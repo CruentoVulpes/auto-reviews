@@ -17,16 +17,18 @@ define( 'AUTO_REVIEWS_VERSION', '1.0.0' );
 define( 'AUTO_REVIEWS_PLUGIN_FILE', __FILE__ );
 define( 'AUTO_REVIEWS_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
-// Auto-updates via Plugin Update Checker (v5).
+// Auto-updates via Plugin Update Checker (GitHub).
 if ( file_exists( AUTO_REVIEWS_PLUGIN_DIR . 'plugin-update-checker/plugin-update-checker.php' ) ) {
     require AUTO_REVIEWS_PLUGIN_DIR . 'plugin-update-checker/plugin-update-checker.php';
 
     if ( class_exists( '\YahnisElsts\PluginUpdateChecker\v5\PucFactory' ) ) {
         $auto_reviews_update_checker = \YahnisElsts\PluginUpdateChecker\v5\PucFactory::buildUpdateChecker(
-            'https://plaguin.axionusteh.com/wp-content/plugins/auto-reviews/info.json',
+            'https://github.com/CruentoVulpes/auto-reviews/',
             __FILE__,
             'auto-reviews'
         );
+
+        $auto_reviews_update_checker->setBranch( 'main' );
     }
 }
 
