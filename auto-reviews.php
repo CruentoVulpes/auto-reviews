@@ -3,7 +3,7 @@
  * Plugin Name: Auto Reviews
  * Description: Автоматическое управление отзывами: очередь, импорт из Google Таблиц, генерация через GPT и динамическая микроразметка.
  * Author: Vlad
- * Version: 1.0.1
+ * Version: 1.0.2
  * Text Domain: auto-reviews
  *
  * Bootstrap-файл. Вся логика лежит в `includes/` в неймспейсе `AutoReviews`.
@@ -13,7 +13,7 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-define( 'AUTO_REVIEWS_VERSION', '1.0.0' );
+define( 'AUTO_REVIEWS_VERSION', '1.0.2' );
 define( 'AUTO_REVIEWS_PLUGIN_FILE', __FILE__ );
 define( 'AUTO_REVIEWS_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 
