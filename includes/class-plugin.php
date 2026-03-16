@@ -473,7 +473,13 @@ class Plugin {
      * Settings registration.
      */
     public function register_settings() {
-        register_setting( 'auto_reviews_settings_group', self::OPTION_SETTINGS );
+        register_setting(
+            'auto_reviews_settings_group',
+            self::OPTION_SETTINGS,
+            [
+                'sanitize_callback' => [ $this, 'sanitize_settings' ],
+            ]
+        );
 
         add_settings_section(
             'auto_reviews_main',
@@ -547,6 +553,20 @@ class Plugin {
         );
 
         add_settings_field(
+            'gpt_prompt_template',
+            __( 'GPT prompt template', 'auto-reviews' ),
+            [ $this, 'field_textarea_callback' ],
+            'auto-reviews-settings',
+            'auto_reviews_main',
+            [
+                'label_for' => 'gpt_prompt_template',
+                'option'    => 'gpt_prompt_template',
+                'default'   => $this->get_default_gpt_prompt_template(),
+                'rows'      => 6,
+            ]
+        );
+
+        add_settings_field(
             'comments_post_id',
             __( 'ID поста/страницы для комментариев', 'auto-reviews' ),
             [ $this, 'field_number_callback' ],
@@ -596,12 +616,54 @@ class Plugin {
             'publish_max'         => 4,
             'publish_frequency'   => 'monthly',
             'gpt_api_key'         => '',
+            'gpt_prompt_template' => $this->get_default_gpt_prompt_template(),
             'comments_post_id'    => 0,
             'show_date_in_reviews' => 0,
             'external_reviews_offset' => 0,
         ];
         $options  = get_option( self::OPTION_SETTINGS, [] );
         return wp_parse_args( $options, $defaults );
+    }
+
+    /**
+     * Default GPT prompt template.
+     *
+     * Available placeholders:
+     * - %LANG%     Language instruction string
+     * - %COUNT%    Number of reviews
+     * - %BUSINESS% Business/site name
+     */
+    protected function get_default_gpt_prompt_template() {
+        return '%LANG%Сгенерируй %COUNT% реалистичных, развернутых, положительных отзывов о компании/сайте "%BUSINESS%". Ответ верни строго в формате JSON-массива объектов со следующими полями: "author" (имя выдуманного автора), "rating" (целое число от 4 до 5), "content" (текст отзыва, 2-4 предложения). Без пояснений, только JSON.';
+    }
+
+    /**
+     * Sanitize settings array.
+     *
+     * @param array $input Raw settings.
+     * @return array Sanitized settings.
+     */
+    public function sanitize_settings( $input ) {
+        $input = is_array( $input ) ? $input : [];
+        $out   = [];
+
+        $out['publish_min'] = isset( $input['publish_min'] ) ? max( 1, min( 50, intval( $input['publish_min'] ) ) ) : 1;
+        $out['publish_max'] = isset( $input['publish_max'] ) ? max( 1, min( 50, intval( $input['publish_max'] ) ) ) : 4;
+
+        $allowed_freq = [ 'daily', 'twicedaily', '3days', 'weekly', '2weeks', 'monthly' ];
+        $freq         = isset( $input['publish_frequency'] ) ? sanitize_text_field( $input['publish_frequency'] ) : 'monthly';
+        $out['publish_frequency'] = in_array( $freq, $allowed_freq, true ) ? $freq : 'monthly';
+
+        $out['gpt_api_key'] = isset( $input['gpt_api_key'] ) ? sanitize_text_field( $input['gpt_api_key'] ) : '';
+
+        $template = isset( $input['gpt_prompt_template'] ) ? sanitize_textarea_field( $input['gpt_prompt_template'] ) : '';
+        $out['gpt_prompt_template'] = ( '' !== trim( $template ) ) ? $template : $this->get_default_gpt_prompt_template();
+
+        $out['comments_post_id'] = isset( $input['comments_post_id'] ) ? max( 0, intval( $input['comments_post_id'] ) ) : 0;
+        $out['show_date_in_reviews'] = ! empty( $input['show_date_in_reviews'] ) ? 1 : 0;
+        $out['external_reviews_offset'] = isset( $input['external_reviews_offset'] ) ? max( 0, intval( $input['external_reviews_offset'] ) ) : 0;
+
+        return $out;
     }
 
     public function field_number_callback( $args ) {
@@ -647,6 +709,23 @@ class Plugin {
                autocomplete="off">
         <p class="description">
             <?php esc_html_e( 'Ключ в настройках робит, но есть енв файл и если там есть ключ он будет в приоритете.', 'auto-reviews' ); ?>
+        </p>
+        <?php
+    }
+
+    public function field_textarea_callback( $args ) {
+        $settings = $this->get_settings();
+        $option   = $args['option'];
+        $value    = isset( $settings[ $option ] ) ? $settings[ $option ] : $args['default'];
+        $rows     = isset( $args['rows'] ) ? max( 3, intval( $args['rows'] ) ) : 6;
+        ?>
+        <textarea
+            id="<?php echo esc_attr( $option ); ?>"
+            name="<?php echo esc_attr( self::OPTION_SETTINGS . '[' . $option . ']' ); ?>"
+            rows="<?php echo esc_attr( $rows ); ?>"
+            class="large-text code"><?php echo esc_textarea( $value ); ?></textarea>
+        <p class="description">
+            <?php esc_html_e( 'Доступные переменные: %LANG% (инструкция языка), %COUNT% (кол-во отзывов), %BUSINESS% (название).', 'auto-reviews' ); ?>
         </p>
         <?php
     }
@@ -1189,6 +1268,7 @@ class Plugin {
      * @param string $language     Language for reviews (e.g. "русский", "English"). Empty = Russian.
      */
     protected function generate_reviews_via_gpt( $api_key, $business_name, $count, $language = '' ) {
+        $settings = $this->get_settings();
         if ( '' === trim( $language ) ) {
             $lang_instruction = 'All reviews must be written in English. ';
         } else {
@@ -1197,11 +1277,18 @@ class Plugin {
                 trim( $language )
             );
         }
-        $prompt = sprintf(
-            '%3$sСгенерируй %1$d реалистичных, развернутых, положительных отзывов о компании/сайте "%2$s". Ответ верни строго в формате JSON-массива объектов со следующими полями: "author" (имя выдуманного автора), "rating" (целое число от 4 до 5), "content" (текст отзыва, 2-4 предложения). Без пояснений, только JSON.',
-            $count,
-            $business_name,
-            $lang_instruction
+        $template = isset( $settings['gpt_prompt_template'] ) ? $settings['gpt_prompt_template'] : $this->get_default_gpt_prompt_template();
+        if ( '' === trim( (string) $template ) ) {
+            $template = $this->get_default_gpt_prompt_template();
+        }
+
+        $prompt = strtr(
+            (string) $template,
+            [
+                '%LANG%'     => (string) $lang_instruction,
+                '%COUNT%'    => (string) intval( $count ),
+                '%BUSINESS%' => (string) $business_name,
+            ]
         );
 
         $body = [
