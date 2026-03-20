@@ -7,24 +7,24 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 /**
- * Простая обёртка для работы с переменными окружения и .env в плагине.
+ * Simple wrapper for working with environment variables and .env in the plugin.
  *
- * Приоритет:
+ * Priority:
  * 1) $_ENV / $_SERVER
  * 2) getenv()
- * 3) .env в корне плагина (AUTO_REVIEWS_PLUGIN_DIR/.env)
+ * 3) .env in the plugin root (AUTO_REVIEWS_PLUGIN_DIR/.env)
  */
 class Env {
 
     /**
-     * Кэш значений из .env файла.
+     * Cached values loaded from the .env file.
      *
      * @var array|null
      */
     protected static $file_vars = null;
 
     /**
-     * Получить значение переменной окружения.
+     * Get the value of an environment variable.
      *
      * @param string $key
      * @param mixed  $default
@@ -47,7 +47,7 @@ class Env {
             return $val;
         }
 
-        // 3) .env файл.
+        // 3) .env file.
         $vars = self::load_file_vars();
         if ( isset( $vars[ $key ] ) ) {
             return $vars[ $key ];
@@ -57,7 +57,7 @@ class Env {
     }
 
     /**
-     * Загрузка .env файла (лениво, 1 раз за запрос).
+     * Lazy-load the .env file (1 time per request).
      *
      * @return array
      */
