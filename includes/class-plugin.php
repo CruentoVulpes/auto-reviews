@@ -20,7 +20,7 @@ class Plugin {
     protected static $instance = null;
 
     /**
-     * Получить инстанс плагина.
+     * Get the plugin instance.
      *
      * @return Plugin
      */
@@ -41,6 +41,7 @@ class Plugin {
         add_action( 'admin_menu', [ $this, 'register_admin_menu' ] );
         add_action( 'admin_init', [ $this, 'register_settings' ] );
         add_action( 'admin_init', [ $this, 'maybe_reschedule_cron' ] );
+        add_action( 'update_option_' . self::OPTION_SETTINGS, [ $this, 'schedule_cron' ] );
 
         add_filter( 'cron_schedules', [ $this, 'register_monthly_schedule' ] );
         add_action( self::CRON_HOOK, [ $this, 'cron_publish_from_queue' ] );
@@ -50,7 +51,7 @@ class Plugin {
         add_shortcode( 'auto_reviews_schema', [ $this, 'shortcode_reviews_schema' ] );
         add_shortcode( 'auto_reviews_list', [ $this, 'shortcode_reviews_list' ] );
 
-        // Не выводим отдельный блок в head — aggregateRating подставляется в разметку через фильтр auto_reviews_aggregate_rating_schema.
+        // We don't output a separate block in <head> — aggregateRating is injected via auto_reviews_aggregate_rating_schema.
         add_filter( 'auto_reviews_aggregate_rating_schema', [ $this, 'get_aggregate_rating_for_schema' ] );
 
         add_action( 'wp_ajax_auto_reviews_publish_now', [ $this, 'ajax_publish_now' ] );
@@ -180,14 +181,14 @@ class Plugin {
     }
 
     /**
-     * Обработчик изменения статуса поста - автоматически убирает из очереди при публикации.
+     * Handle post status transitions: remove from the queue when published.
      */
     public function on_post_status_change( $new_status, $old_status, $post ) {
         if ( self::CPT !== $post->post_type ) {
             return;
         }
 
-        // Если отзыв переходит в статус "опубликован", убираем его из очереди и создаём комментарий.
+        // If a review transitions to "publish", remove it from the queue and create a comment.
         if ( 'publish' === $new_status && 'publish' !== $old_status ) {
             update_post_meta( $post->ID, '_auto_reviews_queued', '0' );
             $this->maybe_create_comment_from_review( $post->ID );
@@ -278,7 +279,7 @@ class Plugin {
     }
 
     /**
-     * Скрывает дату для комментариев из отзывов.
+     * Hides the date for comments created from reviews.
      */
     public function hide_comment_date( $date, $format, $comment ) {
         if ( ! $comment || ! isset( $comment->comment_ID ) ) {
@@ -295,7 +296,7 @@ class Plugin {
     }
 
     /**
-     * Скрывает время для комментариев из отзывов.
+     * Hides the time for comments created from reviews.
      */
     public function hide_comment_time( $time, $format, $comment ) {
         if ( ! $comment || ! isset( $comment->comment_ID ) ) {
@@ -312,7 +313,7 @@ class Plugin {
     }
 
     /**
-     * Скрывает вывод даты для комментариев из отзывов.
+     * Hides the displayed date output for comments created from reviews.
      */
     public function hide_comment_date_output( $date, $format, $comment ) {
         if ( ! $comment || ! isset( $comment->comment_ID ) ) {
@@ -329,7 +330,7 @@ class Plugin {
     }
 
     /**
-     * Скрывает вывод времени для комментариев из отзывов.
+     * Hides the displayed time output for comments created from reviews.
      */
     public function hide_comment_time_output( $time, $format, $comment ) {
         if ( ! $comment || ! isset( $comment->comment_ID ) ) {
@@ -346,7 +347,7 @@ class Plugin {
     }
 
     /**
-     * Добавляет CSS в админке для скрытия даты комментариев из отзывов.
+     * Adds admin CSS to hide the date for comments created from reviews.
      */
     public function add_admin_css() {
         $settings = $this->get_settings();
@@ -366,7 +367,7 @@ class Plugin {
     }
 
     /**
-     * Добавляет CSS на фронтенде для скрытия даты комментариев из отзывов.
+     * Adds frontend CSS to hide the date for comments created from reviews.
      */
     public function add_frontend_css() {
         $settings = $this->get_settings();
@@ -385,7 +386,7 @@ class Plugin {
     }
 
     /**
-     * Добавляет звёздочки рейтинга к тексту комментария из отзыва.
+     * Adds rating stars to the review comment text.
      */
     public function add_rating_stars_to_comment( $comment_text, $comment ) {
         if ( ! $comment || ! isset( $comment->comment_ID ) ) {
@@ -798,7 +799,7 @@ class Plugin {
      * Cron schedule registration.
      */
     public function register_monthly_schedule( $schedules ) {
-        // Добавляем кастомные интервалы.
+        // Add custom intervals.
         if ( ! isset( $schedules['auto_reviews_3days'] ) ) {
             $schedules['auto_reviews_3days'] = [
                 'interval' => 3 * DAY_IN_SECONDS,
@@ -826,21 +827,21 @@ class Plugin {
         $plugin->register_cpt();
         flush_rewrite_rules();
 
-        // Планируем крон с учетом текущих настроек.
+        // Schedule cron based on the current settings.
         $plugin->schedule_cron();
     }
 
     /**
-     * Планирует крон-задачу согласно настройкам частоты.
+     * Schedules the cron task according to the configured frequency.
      */
-    protected function schedule_cron() {
-        // Удаляем старые расписания.
+    public function schedule_cron() {
+        // Clear old schedules.
         wp_clear_scheduled_hook( self::CRON_HOOK );
 
         $settings = $this->get_settings();
         $frequency = isset( $settings['publish_frequency'] ) ? $settings['publish_frequency'] : 'monthly';
 
-        // Маппинг частоты на интервал WordPress.
+        // Map frequency to a WordPress cron interval.
         $schedule_map = [
             'daily'      => 'daily',
             'twicedaily' => 'twicedaily',
@@ -858,13 +859,11 @@ class Plugin {
     }
 
     /**
-     * Перепланирует крон при изменении настроек частоты.
+     * Ensures the cron is scheduled (useful if wp-cron events were lost).
      */
     public function maybe_reschedule_cron() {
-        if ( isset( $_POST['option_page'] ) && 'auto_reviews_settings_group' === $_POST['option_page'] ) {
-            if ( isset( $_POST[ self::OPTION_SETTINGS ]['publish_frequency'] ) ) {
-                $this->schedule_cron();
-            }
+        if ( ! wp_next_scheduled( self::CRON_HOOK ) ) {
+            $this->schedule_cron();
         }
     }
 
@@ -882,7 +881,7 @@ class Plugin {
     }
 
     /**
-     * Публикует отзывы из очереди (используется и кроном, и AJAX).
+     * Publishes reviews from the queue (used by cron and AJAX).
      *
      * @return array|WP_Error
      */
@@ -995,7 +994,7 @@ class Plugin {
 
     /**
      * CSV import helper.
-     * Ожидаемые колонки: author, rating, content, source, queued (0/1), author_url.
+     * Expected columns: author, rating, content, source, queued (0/1), author_url.
      */
     protected function import_from_csv_url( $url ) {
         $url = $this->convert_google_sheets_url_to_csv( $url );
@@ -1086,10 +1085,10 @@ class Plugin {
     }
 
     /**
-     * Преобразует ссылку Google Sheets в ссылку экспорта CSV.
+     * Converts a Google Sheets URL into a CSV export URL.
      *
-     * @param string $url Исходная ссылка.
-     * @return string Ссылка на CSV экспорт.
+     * @param string $url Source URL.
+     * @return string CSV export URL.
      */
     protected function convert_google_sheets_url_to_csv( $url ) {
         if ( strpos( $url, '/export?format=csv' ) !== false || strpos( $url, '.csv' ) !== false ) {
@@ -1118,8 +1117,8 @@ class Plugin {
     }
 
     /**
-     * Маппинг языков для выбора при генерации отзывов через GPT.
-     * Ключ — значение для API, значение — подпись в выпадающем списке.
+     * Language mapping for selecting review language during GPT generation.
+     * Key is the API value; value is the label shown in the dropdown.
      *
      * @return array<string, string>
      */
@@ -1329,7 +1328,7 @@ class Plugin {
 
         $json = trim( $data['choices'][0]['message']['content'] );
 
-        // Попробуем вытащить JSON даже если GPT добавил текст.
+        // Try to extract JSON even if GPT included extra text.
         if ( preg_match( '/(\[.*\])\s*$/s', $json, $m ) ) {
             $json = $m[1];
         }
@@ -1472,20 +1471,20 @@ class Plugin {
     }
 
     /**
-     * Не выводим отдельный блок Organization в head — данные aggregateRating
-     * встраиваются в статическую разметку темы через фильтр auto_reviews_aggregate_rating_schema.
-     * Шорткод [auto_reviews_schema] по-прежнему можно использовать вручную.
+     * We don't output a separate Organization block in <head> — aggregateRating
+     * is injected into the theme's static markup via auto_reviews_aggregate_rating_schema.
+     * The [auto_reviews_schema] shortcode can still be used manually.
      */
     public function output_schema_in_head() {
-        // Ранее выводили полную схему Organization — теперь только подставляем aggregateRating в разметку темы.
+        // Previously output the full Organization schema — now we only inject aggregateRating into the theme markup.
         return;
     }
 
     /**
-     * Возвращает только блок aggregateRating для подстановки в статическую разметку.
-     * Используется темой/SchemaMarkup для замены всех aggregateRating в своей разметке.
+     * Returns only the aggregateRating block for substitution into the theme's static markup.
+     * Used by the theme/SchemaMarkup to replace all aggregateRating entries in its markup.
      *
-     * @return array|null Массив вида ['@type'=>'AggregateRating','ratingValue'=>...,'reviewCount'=>...,'bestRating'=>5,'worstRating'=>1] или null.
+     * @return array|null Array shaped like ['@type'=>'AggregateRating','ratingValue'=>...,'reviewCount'=>...,'bestRating'=>5,'worstRating'=>1] or null.
      */
     public function get_aggregate_rating_for_schema() {
         $schema = $this->build_schema();
@@ -1525,10 +1524,10 @@ class Plugin {
 
         $avg_rating = array_sum( $ratings ) / max( 1, count( $ratings ) );
 
-        // Базовое количество отзывов — количество опубликованных отзывов плагина.
+        // Base review count = number of published plugin reviews.
         $review_count = count( $ratings );
 
-        // Добавляем ручной оффсет для внешних отзывов (Google, Яндекс и т.п.).
+        // Add manual offset for external reviews (Google, Yandex, etc.).
         $settings = $this->get_settings();
         if ( ! empty( $settings['external_reviews_offset'] ) ) {
             $review_count += max( 0, (int) $settings['external_reviews_offset'] );
